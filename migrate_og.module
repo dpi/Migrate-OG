@@ -1,0 +1,250 @@
+<?php
+/**
+ * provide a 'Member of Organic Group' destination, for use in Migrate content sets.
+ */
+
+function migrate_og_migrate_api () {
+  return array(
+    'api' => 1,
+    'integration modules' => array(
+      'group_membership' => array(
+        'description' => 'Provides a group membership destination for existing many-many relationship tables.',
+        'status' => true,
+      ),
+      'node' => array(
+        'description' => 'Provides Organic Group core attributes for group node types and audience field for group posts.',
+        'status' => true,
+      ),
+    ),
+  );
+}
+
+/**
+ * Implementation of hook_migrate_types()
+ *
+ * Defines the Migrate:Destination
+ *
+ * @return Array
+ */
+function migrate_og_migrate_types() {
+  $types = array(
+    'group_membership' => t('Organic Group Membership'),
+  );
+  return $types;
+}
+
+/**
+ * Implementation of hook_migrate_fields_<type>
+ *
+ * Defines the fields that can be mapped within a 'content set'
+ * Is used for mapping View fields to Destination.
+ *
+ * @return Array
+ */
+function migrate_og_migrate_fields_group_membership() {
+  $fields = array(
+    'nid' => t('Group Membership: Organic Group Node ID'), // The NID of the Organic Group  
+    'uid' => t('Group Membership: Drupal User ID'), // The UID of the Drupal User
+    //'og_role' => t(''), // field is not used
+    'is_active' => t('Group Membership: Active?'), // is this users membership active, or awaiting approval?
+    'is_admin' => t('Group Membership: Admin?'),
+    'created' => t('Group Membership: Created on'),
+    'changed' => t('Group Membership: Last modified'),
+  );
+  return $fields;
+}
+
+/**
+ * Implementation of hook_migrate_fields_<type>
+ *
+ * Adding a field here is all that is needed to add a new field to {og}
+ *
+ * @return Array
+ */
+function migrate_og_migrate_fields_node($type) {
+  $fields = array();
+  
+  // Group Fields
+  if (og_is_group_type($type)) {
+    // OG Core
+    $fields['og_directory'] = t('Organic Groups: List in Directory'); // Boolean list in directory?
+    $fields['og_description'] = t('Organic Groups: Description'); // Description of Group. Used in Group Directory Listing.
+    $fields['og_selective'] = t('Organic Groups: Membership Request Mode'); // Open/Moderated/Invite Only/Close etc
+    $fields['og_register'] = t('Organic Groups: Show on user registration form?'); // show on user/register?
+    
+    // Extend Locale
+    if (module_exists('locale')) {
+      $fields['og_language'] = t('Organic Groups + Locale: Language'); // Safe default: empty
+    }
+    
+    // Extend OG Access
+    if (module_exists('og_access')) {
+      $fields['og_private'] = t('Organic Groups + OG Access: Private?'); // should this group be private?
+    }
+  }
+  
+  // Group Posts
+  // @TODO: add wiki later?
+  if (og_is_group_post_type($type)) {
+    $fields['og_audience'] = t('Organic Groups: Audience'); // what groups should this node be posted in?
+    $fields['og_public'] = t('Organic Groups + OG Access: Public?'); // should this post be public?
+  }
+  
+  return $fields;
+}
+
+/**
+ * Implementation of hook_migrate_delete_<type>
+ *
+ * Deletes content created by one row of migrated content.
+ *
+ * @param int $rid (Row ID) Takes the PRIMARY unique ID of the destination object.
+ * 
+ * @return none
+ */
+function migrate_og_migrate_delete_group_membership($cset_info, $rid) {
+  // @TODO: See readme for critical information about what needs to be done here.
+  
+  $group_mem_row = db_fetch_object(db_query("SELECT dest_group_nid, dest_user_uid FROM {%s} WHERE sourceid='%d'", $cset_info->maptable, $rid));
+  
+  og_delete_subscription($group_mem_row->dest_group_nid, $group_mem_row->dest_user_uid);
+}
+
+
+/**
+ * Implementation of hook_migrate_import_<type>
+ *
+ * This function is executed __for each__ row of content (from views) that is being migrated.
+ * Data created here is made available for other modules to act on (via an invoke), before it is imported into the DB.
+ *
+ * @param $cset_info StdClass Object contains information about the 'content set'
+ *        $cset_info->fields Array contains the fields that were mapped by the user (Source field is not <none>)
+ * @param $row StdClass Object contains data about one row of content from the source Views table
+ *        $row->destid exists when we are updating existing
+ * 
+ * @return array of values returned by migrate_message().
+ */
+function migrate_og_migrate_import_group_membership($cset_info, $row) {
+  $messages = array();
+  $db_ret = array();
+  $obj = array();
+  
+  // Prepare Group Membership Obj Creation
+  $messages = array_merge($messages, migrate_destination_invoke_all('prepare_group_membership', $obj, $tblinfo, $row));
+  
+  // Check the mapping maintains integrity
+  if (!isset($cset_info->fields['nid']) || !isset($cset_info->fields['uid'])) {
+    // I'm sorry Dave, but we require these to be set
+    $group_membership_fields = migrate_og_migrate_fields_group_membership();
+    $messages[] = migrate_message(t('Group Node ID and User ID source fields must be set in @machinename', array('@machinename' => $cset_info->machine_name)), MIGRATE_MESSAGE_NOTICE);
+    return $messages;
+  }
+  
+  // Validate row values
+  
+  $gid = 0;
+  $uid = 0;
+  $args = array();
+  
+  foreach ($cset_info->fields as $field_name => $values) {
+    switch ($field_name) {
+      case 'nid':
+        $gid = $row->$values['srcfield'];
+        break;
+      case 'uid':
+        $uid = $row->$values['srcfield'];
+        break;
+      default:
+        $args[$field_name] = (!empty($row->$values['srcfield'])) ? $row->$values['srcfield'] : $values['default_value'];
+        break;
+    }
+  }
+  
+  // Save Subscription
+  og_save_subscription($gid, $uid, $args); // og.module L:621
+  $messages[] = migrate_message(t('Group membership created between group:@gid user:@uid', array('@gid' => $gid, '@uid' => $uid)), MIGRATE_MESSAGE_INFORMATIONAL);
+  
+  // Pure Testing only
+  
+  // There is no PRIMARY for og_uid. UNIQUE instead (groupid and userid). Workaround:
+  // Check if two extra columns for nid /uid were created for migrate mapping
+  // remember this for each content set's map table
+  static $group_mem_cols_created;
+  
+  if (!isset($group_mem_cols_created[$cset_info->mcsid])) {
+    
+    // @TODO: Use this code when tables are in schema
+    //$cset_map_table_schema = drupal_get_schema($cset_info->maptable);
+    //if (isset($cset_map_table_schema['fields']['dest_group_nid'], $cset_map_table_schema['fields']['dest_user_uid'] )) {
+    
+    if (!db_column_exists($cset_info->maptable, 'dest_user_uid') && !db_column_exists($cset_info->maptable, 'dest_group_nid')) {
+      // @TODO: Add the following columns + key to Drupal schema
+      db_add_field($db_ret, $cset_info->maptable, 'dest_group_nid', array('type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE));
+      db_add_field($db_ret, $cset_info->maptable, 'dest_user_uid', array('type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE));
+      db_add_unique_key($db_ret, $cset_info->maptable, 'MemberOfGroups', array('dest_group_nid', 'dest_user_uid'));
+      
+      
+      $group_mem_cols_created[$cset_info->mcsid] = true;
+      $messages[] = migrate_message(t('Columns added to !table table', array('!table' => $cset_info->maptable)), MIGRATE_MESSAGE_INFORMATIONAL);
+    }
+  }
+  
+  // Add Migrate mapping (add nid-uid later)
+  $sourcekey = $cset_info->sourcekey;
+  migrate_add_mapping($cset_info->mcsid, $row->$sourcekey, $row->$sourcekey);
+  db_query("UPDATE {%s}
+            SET dest_group_nid='%d', dest_user_uid='%d'
+            WHERE sourceid='%d'",
+            $cset_info->maptable, $gid, $uid, $row->$sourcekey);
+  
+  $messages = array_merge($messages, migrate_destination_invoke_all('complete_group_membership', $obj, $cset_info, $row));
+  
+  return $messages;
+}
+
+/**
+ * Implementation of hook_migrate_import_<type>
+ */
+function migrate_og_migrate_complete_node ($node, $cset_info, $row) {
+  $messages = array();
+  
+  // If the node is a group
+  if (og_is_group_type($cset_info->desttype)) {  
+    foreach ($cset_info->fields as $field_name => $values) {
+      // Only add fields created by migrate_og_fields_node to $node
+      if (array_key_exists($field_name, migrate_og_migrate_fields_node($cset_info->desttype))) {
+        $node->$field_name = (!empty($row->$values['srcfield'])) ? $row->$values['srcfield'] : $values['default_value'];
+      }
+    }
+    
+    // Do some integrity checking, these will not stop the migrate process though.
+    if (isset($node->og_private) && $node->og_private && $node->og_directory) {
+      $messages[] = migrate_message(t('Groups that are private are not allowed to be listed in the group directory.'), MIGRATE_MESSAGE_ERROR);
+    }
+    
+    // Update {og}
+    og_update_group($node);
+    
+  } else if (og_is_group_post_type($cset_info->desttype)) { // if is a group post
+    foreach ($cset_info->fields as $field_name => $values) {
+      switch ($field_name) {
+        // og_public handled by nodeapi
+        case 'og_audience':
+          $new_groups = (!empty($row->$values['srcfield'])) ? $row->$values['srcfield'] : $values['default_value'];
+          if (!empty($new_groups)) {
+            if (!empty($node->og_groups)) {
+              $node->og_groups = array_merge($node->og_groups, $new_groups);
+            } else {
+              $node->og_groups = (array)$new_groups;
+            }
+          }
+          break;
+      }
+    }
+    
+    // Update {og_ancestry}
+    og_save_ancestry($node);
+  }
+  
+  return $messages;
+}
