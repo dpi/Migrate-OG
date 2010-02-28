@@ -1,4 +1,5 @@
 <?php
+// $Id$
 /**
  * provide a 'Member of Organic Group' destination, for use in Migrate content sets.
  */
@@ -98,13 +99,13 @@ function migrate_og_migrate_fields_node($type) {
  *
  * Deletes content created by one row of migrated content.
  *
+ * This implementation of hook_migrate_delete_<type> depends on http://drupal.org/node/725462 : "Add $tblinfo to delete hook"
+ *
  * @param int $rid (Row ID) Takes the PRIMARY unique ID of the destination object.
  * 
  * @return none
  */
 function migrate_og_migrate_delete_group_membership($cset_info, $rid) {
-  // @TODO: See readme for critical information about what needs to be done here.
-  
   $group_mem_row = db_fetch_object(db_query("SELECT dest_group_nid, dest_user_uid FROM {%s} WHERE sourceid='%d'", $cset_info->maptable, $rid));
   
   og_delete_subscription($group_mem_row->dest_group_nid, $group_mem_row->dest_user_uid);
@@ -192,10 +193,10 @@ function migrate_og_migrate_import_group_membership($cset_info, $row) {
   // Add Migrate mapping (add nid-uid later)
   $sourcekey = $cset_info->sourcekey;
   migrate_add_mapping($cset_info->mcsid, $row->$sourcekey, $row->$sourcekey);
-  db_query("UPDATE {%s}
+  db_query("UPDATE {$cset_info->maptable}
             SET dest_group_nid='%d', dest_user_uid='%d'
             WHERE sourceid='%d'",
-            $cset_info->maptable, $gid, $uid, $row->$sourcekey);
+            $gid, $uid, $row->$sourcekey);
   
   $messages = array_merge($messages, migrate_destination_invoke_all('complete_group_membership', $obj, $cset_info, $row));
   

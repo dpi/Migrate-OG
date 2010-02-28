@@ -1,3 +1,4 @@
+; $Id$
 name = Migrate OG
 description = Provides a helper for Migrating existing content to Organic Groups.
 core = 6.x
