@@ -1,0 +1,40 @@
+About the Migrate OG module
+Migrate OG provides various helpers for getting your data into Organic Groups.
+
+Installation Notes
+
+You must apply the patch located at http://drupal.org/node/725462 . It has been accepted into Migrate, but is not included in the most recent stable release, as of this writing.
+
+
+Content sets that are the following types will automagically gain extra fields.
+
+* Node: Group Nodes - Any node that is designated as a group node will these fields which you to change Organic Group settings.
+* Organic Groups - These are settings for the core Organic Groups module. If another module is required, it is mentioned under the dependant module.
+
+    * List in Directory
+      Show the group in the group directory listing? (Boolean: 0 or 1)
+    * Membership Request Mode
+
+      How are new membership requests handled? (Int: 0, 1, 2, 3)
+      Edit a group node for more information about these values.
+          * 0: Open
+          * 1: Moderated
+          * 2: Invite Only
+          * 3: Closed
+    * Description
+      The group description used in the group directory listing (String)
+    * Show on user registration form?
+      Show on the public user registration form? (Boolean: 0 or 1)
+
+Locale
+Additional settings provided when Locale module is enabled:
+
+    * Language
+      Leave blank for default (String)
+
+OG Access Control
+Additional settings provided when OG Access Control module is enabled:
+
+    * Private Group
+      Should this group be private? (Boolean: 0 or 1)
+      A group can only be private if List in Directory is disabled (0).
